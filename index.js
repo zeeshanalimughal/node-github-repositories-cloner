@@ -215,6 +215,31 @@ async function cloneRepo(username, repo, outputDir) {
   }
 }
 
+async function cloneRootRepo(username, repo, outputDir) {
+  const repoPath = path.join(outputDir, repo.name);
+  try {
+    console.log(`\nProcessing repository: ${repo.name}`);
+
+    if (!fs.existsSync(repoPath)) {
+      fs.mkdirSync(repoPath, { recursive: true });
+    }
+
+    console.log(`Cloning root repository ${repo.name}...`);
+    const git = simpleGit();
+    const cloneUrl = GITHUB_TOKEN
+      ? `https://${GITHUB_TOKEN}@github.com/${username}/${repo.name}.git`
+      : `https://github.com/${username}/${repo.name}.git`;
+
+    await git.clone(cloneUrl, repoPath, ["--depth", "1"]);
+
+    console.log(`Successfully cloned root repository ${repo.name}`);
+    return { success: true };
+  } catch (error) {
+    console.error(`Error processing repository ${repo.name}:`, error.message);
+    return { success: false };
+  }
+}
+
 (async function () {
   try {
     const args = process.argv.slice(2);
@@ -234,6 +259,7 @@ async function cloneRepo(username, repo, outputDir) {
     }
 
     const username = args[0];
+    const fetchBranchesOption = args.includes("--fetch-branches");
     const outputDir = path.join(__dirname, "repositories", username);
 
     if (!fs.existsSync(outputDir)) {
@@ -249,7 +275,7 @@ async function cloneRepo(username, repo, outputDir) {
     }
 
     console.log(
-      `Found ${repos.length} repositories. Starting sequential cloning...`
+      `Found ${repos.length} repositories. Starting cloning...`
     );
 
     let totalSuccessfulRepos = 0;
@@ -258,14 +284,21 @@ async function cloneRepo(username, repo, outputDir) {
     let totalFailedBranches = 0;
 
     for (const repo of repos) {
-      const result = await cloneRepo(username, repo, outputDir);
+      let result;
+      if (fetchBranchesOption) {
+        result = await cloneRepo(username, repo, outputDir);
+        if (result.success) {
+          totalSuccessfulBranches += result.successfulBranches;
+          totalFailedBranches += result.failedBranches;
+        }
+      } else {
+        result = await cloneRootRepo(username, repo, outputDir);
+      }
+
       if (result.success) {
         totalSuccessfulRepos++;
-        totalSuccessfulBranches += result.successfulBranches;
-        totalFailedBranches += result.failedBranches;
       } else {
         totalFailedRepos++;
-        totalFailedBranches += result.failedBranches;
       }
 
       await delay(1000);
@@ -274,8 +307,10 @@ async function cloneRepo(username, repo, outputDir) {
     console.log("\nFinal Summary:");
     console.log(`Successfully processed repositories: ${totalSuccessfulRepos}`);
     console.log(`Failed repositories: ${totalFailedRepos}`);
-    console.log(`Total successful branches: ${totalSuccessfulBranches}`);
-    console.log(`Total failed branches: ${totalFailedBranches}`);
+    if (fetchBranchesOption) {
+      console.log(`Total successful branches: ${totalSuccessfulBranches}`);
+      console.log(`Total failed branches: ${totalFailedBranches}`);
+    }
   } catch (error) {
     console.error("Error:", error.message || error);
     process.exit(1);
